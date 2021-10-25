@@ -1,11 +1,21 @@
-import { OrganizationType, RepositoryType } from "./types";
+import {
+  GQLError,
+  OrganizationType,
+  ReactionsContent,
+  RepositoryType
+} from "./types";
+import React from "react";
 
 type Props = {
   organization?: OrganizationType;
-  errors?: any[];
+  errors?: GQLError[];
 };
 
-export const Organization = ({ organization, errors }: Props) => {
+export const Organization: React.FC<Props> = ({
+  organization,
+  errors,
+  children
+}) => {
   if (errors) {
     return (
       <p>
@@ -21,7 +31,7 @@ export const Organization = ({ organization, errors }: Props) => {
           <strong>Issues form Organization:</strong>
           <a href={organization.url}>{organization.name}</a>
         </p>
-        <Repository repository={organization.repository} />
+        {children}
       </div>
     );
   }
@@ -29,8 +39,9 @@ export const Organization = ({ organization, errors }: Props) => {
 };
 type RepoPros = {
   repository: RepositoryType;
+  onFetchMoreIssues: () => void;
 };
-const Repository = ({ repository }: RepoPros) => {
+export const Repository = ({ repository, onFetchMoreIssues }: RepoPros) => {
   return (
     <div>
       <p>
@@ -41,9 +52,26 @@ const Repository = ({ repository }: RepoPros) => {
         {repository.issues.edges.map(issue => (
           <li key={issue.node.id}>
             <a href={issue.node.url}>{issue.node.title}</a>
+
+            <ul>
+              {issue.node.reactions.edges.map(reaction => (
+                <li key={reaction.node.id}>
+                  {
+                    ReactionsContent[
+                      (reaction.node
+                        .content as string) as keyof typeof ReactionsContent
+                    ]
+                  }
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>
+      <hr />
+      {repository.issues.pageInfo.hasNextPage && (
+        <button onClick={onFetchMoreIssues}>More</button>
+      )}
     </div>
   );
 };

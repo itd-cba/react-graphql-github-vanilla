@@ -1,12 +1,23 @@
-import React, { ChangeEvent, FormEvent, useEffect, useReducer } from "react";
-import axios, { AxiosError } from "axios";
-import { Organization } from "./Organization";
-import { OrganizationType } from "./types";
+import React, {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useReducer,
+  useCallback
+} from "react";
+import axios from "axios";
+import { Organization, Repository } from "./Organization";
+import {
+  ErrorMessage,
+  GQLError,
+  OrganizationType,
+  SuccessMessage
+} from "./types";
 
 type State = {
   data: Response;
   isLoading: boolean;
-  errors?: any[];
+  errors?: GQLError[];
 };
 
 type Response = {
@@ -15,8 +26,8 @@ type Response = {
 };
 type Action =
   | { type: "request" }
-  | { type: "success"; results: any }
-  | { type: "failure"; error: any[] }
+  | { type: "success"; organization: OrganizationType; cursor?: string }
+  | { type: "failure"; errors: [GQLError] }
   | { type: "update_path"; path: string };
 
 const TITLE = "React GraphQL Github Client";
@@ -28,24 +39,37 @@ const axiosGitHubGraphQL = axios.create({
 });
 
 const GET_ISSUES_OF_REPOSITORY = `
-{
-organization(login: "the-road-to-learn-react") {
-name
-url
-repository(name: "the-road-to-learn-react") {
-  name
-  url
-  issues(last: 5) {
-    edges {
-      node {
-        id
-        title
+  query ($organization: String!, $repository: String!, $cursor:String) {
+    organization(login: $organization) {
+      name
+      url
+      repository(name: $repository) {
+        name
         url
+        issues(first: 5, after: $cursor,  states: [OPEN]) {
+          totalCount
+          pageInfo {
+            endCursor
+            hasNextPage
+          }
+          edges {
+            node {
+              id
+              title
+              url
+              reactions(last: 3) {
+              edges {
+                node {
+                  id
+                  content
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
-}
-}
 }
 `;
 
@@ -55,21 +79,45 @@ const reducer = (state: State, action: Action): State => {
       return { ...state, isLoading: true };
     }
     case "success":
-      console.log(action.results);
+      console.log(action.organization);
+      if (!action.cursor) {
+        return {
+          ...state,
+          data: {
+            ...state.data,
+            organization: action.organization
+          },
+          isLoading: false,
+          errors: undefined
+        };
+      }
       return {
         ...state,
         data: {
           ...state.data,
-          organization: action.results.data?.organization
+          organization: {
+            ...action.organization,
+            repository: {
+              ...action.organization.repository,
+              issues: {
+                ...action.organization.repository.issues,
+                edges: [
+                  ...state.data.organization?.repository.issues.edges!,
+                  ...action.organization.repository.issues.edges
+                ]
+              }
+            }
+          }
         },
         isLoading: false,
-        errors: action.results.errors
+        errors: undefined
       };
     case "failure":
+      console.log(action.errors);
       return {
         ...state,
         isLoading: false,
-        errors: action.error
+        errors: action.errors
       };
     case "update_path":
       return {
@@ -83,11 +131,21 @@ const reducer = (state: State, action: Action): State => {
   return state;
 };
 
+const isSuccess = (data: any): data is SuccessMessage => {
+  return (data as SuccessMessage).data.hasOwnProperty("organization");
+};
+
+const isFailure = (data: any): data is ErrorMessage => {
+  return (data as ErrorMessage).data.hasOwnProperty("errors");
+};
+
 function App() {
   const [state, dispatch] = useReducer(reducer, {
     data: { path: "the-road-to-learn-react/the-road-to-learn-react" },
     isLoading: false
   });
+  const organization = state.data.organization;
+  const errors = state.errors;
 
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
     dispatch({ type: "update_path", path: event.target.value });
@@ -95,23 +153,43 @@ function App() {
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // fetch data
+    onFetchFromGithub();
   };
-  const onFetchFromGithub = () => {
-    dispatch({ type: "request" });
-    axiosGitHubGraphQL
-      .post("", { query: GET_ISSUES_OF_REPOSITORY })
-      .then(result => {
-        console.log(result);
-        dispatch({ type: "success", results: result.data });
-      });
+
+  const onFetchFromGithub = useCallback(
+    (cursor?: string) => {
+      const [organization, repository] = state.data.path.split("/");
+      dispatch({ type: "request" });
+      axiosGitHubGraphQL
+        .post("", {
+          query: GET_ISSUES_OF_REPOSITORY,
+          variables: { organization, repository, cursor }
+        })
+        .then(result => {
+          console.log(result);
+          if (isFailure(result)) {
+            dispatch({ type: "failure", errors: result.data.errors });
+          } else if (isSuccess(result.data)) {
+            dispatch({
+              type: "success",
+              organization: result.data.data.organization,
+              cursor: cursor
+            });
+          }
+        });
+    },
+    [state.data.path]
+  );
+
+  const fetchMoreIssues = () => {
+    const { endCursor } = organization?.repository.issues.pageInfo!;
+    onFetchFromGithub(endCursor);
   };
+
   useEffect(() => {
     onFetchFromGithub();
+    // eslint-disable-next-line
   }, []);
-
-  const organization = state.data.organization;
-  const errors = state.errors;
 
   return (
     <div>
@@ -130,7 +208,14 @@ function App() {
       </form>
       <hr />
       {organization || errors ? (
-        <Organization organization={organization} errors={errors} />
+        <Organization organization={organization} errors={errors}>
+          {organization && (
+            <Repository
+              repository={organization.repository}
+              onFetchMoreIssues={fetchMoreIssues}
+            />
+          )}
+        </Organization>
       ) : (
         <p>No Information yet…</p>
       )}
