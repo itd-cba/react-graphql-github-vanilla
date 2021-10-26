@@ -40,14 +40,28 @@ export const Organization: React.FC<Props> = ({
 type RepoPros = {
   repository: RepositoryType;
   onFetchMoreIssues: () => void;
+  onStarRepository: (repositoryId: string, viewerHasStarred: boolean) => void;
 };
-export const Repository = ({ repository, onFetchMoreIssues }: RepoPros) => {
+export const Repository = ({
+  repository,
+  onFetchMoreIssues,
+  onStarRepository
+}: RepoPros) => {
   return (
     <div>
       <p>
         <strong>In Repository</strong>
         <a href={repository.url}>{repository.name}</a>
       </p>
+      <button
+        type={"button"}
+        onClick={() =>
+          onStarRepository(repository.id, repository.viewerHasStarred)
+        }
+      >
+        {repository.stargazers.totalCount}
+        {repository.viewerHasStarred ? " Unstar" : " Star"}
+      </button>
       <ul>
         {repository.issues.edges.map(issue => (
           <li key={issue.node.id}>

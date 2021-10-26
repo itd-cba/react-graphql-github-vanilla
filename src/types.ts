@@ -10,9 +10,14 @@ export type OrganizationType = {
 };
 
 export type RepositoryType = {
+  id: string;
   name: string;
   url: string;
+  stargazers: {
+    totalCount: number;
+  };
   issues: IssueList;
+  viewerHasStarred: boolean;
 };
 
 export type IssueList = {
@@ -68,5 +73,25 @@ export type GQLError = {
 export type SuccessMessage = {
   data: {
     organization: OrganizationType;
+  };
+};
+
+export type AddStarMutationResponse = {
+  data: {
+    addStar: {
+      starrable: {
+        viewerHasStarred: boolean;
+      };
+    };
+  };
+};
+
+export type RemoveStarMutationResponse = {
+  data: {
+    removeStar: {
+      starrable: {
+        viewerHasStarred: boolean;
+      };
+    };
   };
 };

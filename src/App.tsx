@@ -5,14 +5,21 @@ import React, {
   useReducer,
   useCallback
 } from "react";
-import axios from "axios";
+import axios, { AxiosResponse } from "axios";
 import { Organization, Repository } from "./Organization";
 import {
   ErrorMessage,
   GQLError,
   OrganizationType,
-  SuccessMessage
+  AddStarMutationResponse,
+  SuccessMessage,
+  RemoveStarMutationResponse
 } from "./types";
+import {
+  ADD_STAR,
+  GET_ISSUES_OF_REPOSITORY,
+  REMOVE_STAR
+} from "./QueriesAndMutations";
 
 type State = {
   data: Response;
@@ -28,7 +35,8 @@ type Action =
   | { type: "request" }
   | { type: "success"; organization: OrganizationType; cursor?: string }
   | { type: "failure"; errors: [GQLError] }
-  | { type: "update_path"; path: string };
+  | { type: "update_path"; path: string }
+  | { type: "update_star"; viewerHasStarred: boolean };
 
 const TITLE = "React GraphQL Github Client";
 const axiosGitHubGraphQL = axios.create({
@@ -37,41 +45,6 @@ const axiosGitHubGraphQL = axios.create({
     Authorization: `bearer ${process.env["REACT_APP_GITHUB_ACCESS_TOKEN"]}`
   }
 });
-
-const GET_ISSUES_OF_REPOSITORY = `
-  query ($organization: String!, $repository: String!, $cursor:String) {
-    organization(login: $organization) {
-      name
-      url
-      repository(name: $repository) {
-        name
-        url
-        issues(first: 5, after: $cursor,  states: [OPEN]) {
-          totalCount
-          pageInfo {
-            endCursor
-            hasNextPage
-          }
-          edges {
-            node {
-              id
-              title
-              url
-              reactions(last: 3) {
-              edges {
-                node {
-                  id
-                  content
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-`;
 
 const reducer = (state: State, action: Action): State => {
   switch (action.type) {
@@ -127,6 +100,27 @@ const reducer = (state: State, action: Action): State => {
           path: action.path
         }
       };
+    case "update_star":
+      const totalStars = state.data.organization?.repository.stargazers
+        .totalCount!;
+      return {
+        ...state,
+        data: {
+          ...state.data,
+          organization: {
+            ...state.data.organization!,
+            repository: {
+              ...state.data.organization?.repository!,
+              viewerHasStarred: action.viewerHasStarred,
+              stargazers: {
+                totalCount: action.viewerHasStarred
+                  ? totalStars + 1
+                  : totalStars - 1
+              }
+            }
+          }
+        }
+      };
   }
   return state;
 };
@@ -137,6 +131,20 @@ const isSuccess = (data: any): data is SuccessMessage => {
 
 const isFailure = (data: any): data is ErrorMessage => {
   return (data as ErrorMessage).data.hasOwnProperty("errors");
+};
+
+const addStarToRepository = (repositoryId: string) => {
+  return axiosGitHubGraphQL.post<AddStarMutationResponse>("", {
+    query: ADD_STAR,
+    variables: { repositoryId }
+  });
+};
+
+const removeStarFromRepository = (repositoryId: string) => {
+  return axiosGitHubGraphQL.post<RemoveStarMutationResponse>("", {
+    query: REMOVE_STAR,
+    variables: { repositoryId }
+  });
 };
 
 function App() {
@@ -186,6 +194,32 @@ function App() {
     onFetchFromGithub(endCursor);
   };
 
+  const onStarRespository = async (
+    repositoryId: string,
+    viewerHasStarred: any
+  ) => {
+    let starMutationResponse: AxiosResponse<
+      AddStarMutationResponse | RemoveStarMutationResponse
+    >;
+    let newStarState: boolean;
+    if (viewerHasStarred) {
+      starMutationResponse = await removeStarFromRepository(repositoryId);
+      newStarState = (starMutationResponse as AxiosResponse<
+        RemoveStarMutationResponse
+      >).data.data.removeStar.starrable.viewerHasStarred;
+    } else {
+      const starMutationResponse = await addStarToRepository(repositoryId);
+      newStarState = (starMutationResponse as AxiosResponse<
+        AddStarMutationResponse
+      >).data.data.addStar.starrable.viewerHasStarred;
+    }
+
+    dispatch({
+      type: "update_star",
+      viewerHasStarred: newStarState
+    });
+  };
+
   useEffect(() => {
     onFetchFromGithub();
     // eslint-disable-next-line
@@ -213,6 +247,7 @@ function App() {
             <Repository
               repository={organization.repository}
               onFetchMoreIssues={fetchMoreIssues}
+              onStarRepository={onStarRespository}
             />
           )}
         </Organization>
